@@ -7,7 +7,9 @@
 function isPaused_() {
   return PropertiesService.getScriptProperties().getProperty('BOT_PAUSED') === 'true';
 }
-function ok_() { return ContentService.createTextOutput('OK'); }
+// DEVUELVE 200 OK SIN REDIRECCIONES (evita 302)
+function ok_() { return HtmlService.createHtmlOutput('OK'); }
+
 function BOT_pause() { PropertiesService.getScriptProperties().setProperty('BOT_PAUSED','true'); }
 function BOT_resume() { PropertiesService.getScriptProperties().deleteProperty('BOT_PAUSED'); }
 
@@ -23,19 +25,35 @@ function sendTelegramMessage_(chatId, text, extra) {
     parse_mode: 'HTML',
     disable_web_page_preview: true
   }, (extra || {}));
-  UrlFetchApp.fetch(url, { method:'post', payload, muteHttpExceptions:true });
+  // Enviar como JSON y loguear errores para depurar silencios
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  const code = res.getResponseCode();
+  if (code >= 300) {
+    Logger.log('sendMessage ERROR ' + code + ' → ' + res.getContentText());
+  }
 }
 
 /** --- Util: partir por | y limpiar --- */
 function splitArgsPipe_(line) {
   if (!line) return [];
-  return line.split('|').map(s => s.trim()).filter(s => s.length || s === '0');
+  // Asegura arrow function válido y limpieza robusta
+  return line.split('|')
+             .map(function (s){ return s.trim(); })
+             .filter(function (s){ return s.length || s === '0'; });
 }
 
 /** --- doPost: Router principal --- */
 function doPost(e) {
   try {
     if (isPaused_()) return ok_(); // cortafuegos
+
+    // BLINDAJE: si no viene nada o ejec. manual → 200 OK y salimos
+    if (!e || !e.postData || !e.postData.contents) return ok_();
 
     // 1) Parseo básico
     const update = JSON.parse(e.postData.contents || '{}');
@@ -61,7 +79,7 @@ function doPost(e) {
 
     // 4) Normalización (soporta /cmd@Bot y espacios)
     const text = rawText.replace(/\s+/g, ' ');
-    const lower = text.toLowerCase();
+    // const lower = text.toLowerCase(); // (no usada ahora)
 
     // 5) HELP: acepta /help, help, /ayuda, ayuda, /bot ayuda (+@Bot)
     if (/^(?:\/help(?:@[\w_]+)?|help|\/ayuda(?:@[\w_]+)?|ayuda|\/bot\s+ayuda)$/i.test(text)) {
@@ -159,8 +177,9 @@ function doPost(e) {
   } catch (err) {
     Logger.log('doPost error: ' + (err.stack || err));
     try {
-      const update = JSON.parse(e.postData.contents || '{}');
-      const chatId = update?.message?.chat?.id || update?.edited_message?.chat?.id;
+      const update = JSON.parse(e && e.postData && e.postData.contents || '{}');
+      const chatId = (update && update.message && update.message.chat && update.message.chat.id)
+        || (update && update.edited_message && update.edited_message.chat && update.edited_message.chat.id);
       if (chatId) sendTelegramMessage_(chatId, '⚠️ Ocurrió un error. Usa <b>/help</b> para ver los comandos.');
     } catch (_) {}
     return ok_(); // Siempre OK para que Telegram no reintente
