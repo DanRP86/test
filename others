@@ -28,3 +28,21 @@ function diagSheets_() {
     }
   });
 }
+
+
+/////////////
+function testSpreadsheetConnection_() {
+  const id = PropertiesService.getScriptProperties().getProperty('DB_SHEET_ID');
+  if (!id) {
+    Logger.log('❌ No hay DB_SHEET_ID guardado.');
+    return;
+  }
+
+  try {
+    const ss = SpreadsheetApp.openById(id);
+    Logger.log('✅ Conectado al Excel: ' + ss.getName());
+    Logger.log('URL: ' + ss.getUrl());
+  } catch (e) {
+    Logger.log('❌ Error al conectar con el Excel: ' + e.message);
+  }
+}
