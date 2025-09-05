@@ -1,0 +1,9 @@
+function setDbId_() {
+  // Pega aquí la URL "compartir" de tu Spreadsheet (la que ves en el navegador)
+  const url = 'https://docs.google.com/spreadsheets/d/XXXXXXXXXXXXXXX/edit#gid=0';
+  const m = url.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!m) throw new Error('URL de spreadsheet no válida');
+  const id = m[1];
+  PropertiesService.getScriptProperties().setProperty('DB_SHEET_ID', id);
+  Logger.log('DB_SHEET_ID=' + id);
+}
