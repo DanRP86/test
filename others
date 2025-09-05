@@ -53,3 +53,44 @@ function runTestSpreadsheetConnection() {
   testSpreadsheetConnection_(); // esta está en aux.gs
 }
 
+/////////////
+/** Wrapper para poder ejecutar desde el editor y desde menús si quieres */
+function printProps() {
+  return printProps_();
+}
+
+//////////////////
+
+function doGet(e) {
+  // ?action=props → devuelve las props en texto plano
+  if (e && e.parameter && e.parameter.action === 'props') {
+    const txt = printProps_(); // ahora devuelve string (ver mejora abajo)
+    return ContentService
+      .createTextOutput(txt)
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+  return ok_(); // tu 200 OK
+}
+
+////////////////
+
+function printProps_() {
+  const p = PropertiesService.getScriptProperties();
+  const data = {
+    has_TELEGRAM_TOKEN: !!p.getProperty('TELEGRAM_TOKEN'),
+    ALLOWED_CHAT_ID   : p.getProperty('ALLOWED_CHAT_ID') || '(no set)',
+    DB_SHEET_ID       : p.getProperty('DB_SHEET_ID')     || '(no set)',
+    BOT_PAUSED        : p.getProperty('BOT_PAUSED')      || '(no)'
+  };
+
+  Logger.log(data);
+
+  // formato texto para /props o ?action=props
+  const lines = [
+    `has_TELEGRAM_TOKEN: ${data.has_TELEGRAM_TOKEN}`,
+    `ALLOWED_CHAT_ID   : ${data.ALLOWED_CHAT_ID}`,
+    `DB_SHEET_ID       : ${data.DB_SHEET_ID}`,
+    `BOT_PAUSED        : ${data.BOT_PAUSED}`
+  ];
+  return lines.join('\n');
+}
