@@ -1,31 +1,51 @@
 /***************************************************
  * code.gs
- * Webhook Telegram + router de comandos
+ * Webhook Telegram + router de comandos (MVP estable)
+ * - 200 OK sin redirecciones (HtmlService) → evita 302
+ * - Dedupe por update_id (Cache 30s)
+ * - Anti-old updates (>2 min)
+ * - Modo pausa
+ * - Utilidades de propiedades/webhook/diagnóstico
  ***************************************************/
 
-/** --- Killswitch/Pausa sin tocar despliegue --- */
+/** ========== Modo pausa / salud del bot ========== **/
+
 function isPaused_() {
   return PropertiesService.getScriptProperties().getProperty('BOT_PAUSED') === 'true';
 }
-// DEVUELVE 200 OK SIN REDIRECCIONES (evita 302)
-function ok_() { return HtmlService.createHtmlOutput('OK'); }
 
-function BOT_pause() { PropertiesService.getScriptProperties().setProperty('BOT_PAUSED','true'); }
-function BOT_resume() { PropertiesService.getScriptProperties().deleteProperty('BOT_PAUSED'); }
+// 200 OK sin redirecciones (evita 302)
+function ok_() { 
+  return HtmlService.createHtmlOutput('OK'); 
+}
 
-/** --- Envío de mensajes (usa tu propio helper si ya tienes uno) --- */
+function BOT_pause() { 
+  PropertiesService.getScriptProperties().setProperty('BOT_PAUSED','true'); 
+}
+function BOT_resume() { 
+  PropertiesService.getScriptProperties().deleteProperty('BOT_PAUSED'); 
+}
+function BOT_status() {
+  const paused = isPaused_();
+  Logger.log({ paused });
+  return paused ? '⏸️ Bot PAUSADO' : '▶️ Bot ACTIVO';
+}
+
+/** ========== Envío de mensajes a Telegram ========== **/
+
 function sendTelegramMessage_(chatId, text, extra) {
   if (isPaused_()) return; // no enviar si pausado
   const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
   if (!token) throw new Error('Falta TELEGRAM_TOKEN en Propiedades del Script.');
+
   const url = 'https://api.telegram.org/bot' + token + '/sendMessage';
   const payload = Object.assign({
     chat_id: chatId,
     text: text,
-    parse_mode: 'HTML',
+    parse_mode: 'HTML',             // tienes help() en HTML
     disable_web_page_preview: true
   }, (extra || {}));
-  // Enviar como JSON y loguear errores para depurar silencios
+
   const res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
@@ -38,24 +58,32 @@ function sendTelegramMessage_(chatId, text, extra) {
   }
 }
 
-/** --- Util: partir por | y limpiar --- */
+/** ========== Utils generales ========== **/
+
+// partir por | y limpiar
 function splitArgsPipe_(line) {
   if (!line) return [];
-  // Asegura arrow function válido y limpieza robusta
-  return line.split('|')
-             .map(function (s){ return s.trim(); })
-             .filter(function (s){ return s.length || s === '0'; });
+  return line
+    .split('|')
+    .map(function (s){ return s.trim(); })
+    .filter(function (s){ return s.length || s === '0'; });
 }
 
-/** --- doPost: Router principal --- */
+// salida GET para probar que /exec vive (en incógnito debe responder "OK")
+function doGet() { 
+  return ok_(); 
+}
+
+/** ========== doPost: router principal ========== **/
+
 function doPost(e) {
   try {
     if (isPaused_()) return ok_(); // cortafuegos
 
-    // BLINDAJE: si no viene nada o ejec. manual → 200 OK y salimos
+    // Blindaje: si no viene nada o ejec. manual → 200 y salimos
     if (!e || !e.postData || !e.postData.contents) return ok_();
 
-    // 1) Parseo básico
+    // 1) Parseo básico del update
     const update = JSON.parse(e.postData.contents || '{}');
     const updId = update.update_id;
     const msg = update.message || update.edited_message;
@@ -65,7 +93,7 @@ function doPost(e) {
     const rawText = (msg.text || '').trim();
     if (!rawText) return ok_();
 
-    // 2) Anti-loop: ignora updates antiguos (>2 min)
+    // 2) Anti-loop: ignora updates antiguos (> 2 min)
     const isOld = ((Date.now()/1000) - (msg.date || 0)) > 120;
     if (isOld) return ok_();
 
@@ -79,15 +107,17 @@ function doPost(e) {
 
     // 4) Normalización (soporta /cmd@Bot y espacios)
     const text = rawText.replace(/\s+/g, ' ');
-    // const lower = text.toLowerCase(); // (no usada ahora)
+    // const lower = text.toLowerCase();
 
     // 5) HELP: acepta /help, help, /ayuda, ayuda, /bot ayuda (+@Bot)
     if (/^(?:\/help(?:@[\w_]+)?|help|\/ayuda(?:@[\w_]+)?|ayuda|\/bot\s+ayuda)$/i.test(text)) {
+      // IAHome.helpMessage() debe existir en functions.gs
       sendTelegramMessage_(chatId, IAHome.helpMessage());
       return ok_();
     }
 
-    // 6) Rutas de comandos (MVP)
+    // 6) COMANDOS MVP (tus funciones ya existen en functions.gs)
+
     // /water NombrePlanta
     {
       const m = text.match(/^\/water(?:@[\w_]+)?\s+(.+)$/i);
@@ -166,7 +196,7 @@ function doPost(e) {
       }
     }
 
-    // 7) Fallback (texto libre): por ahora, mensaje estable (no GPT aún)
+    // 7) Fallback (modo comandos, sin NLU aún)
     sendTelegramMessage_(
       chatId,
       '👋 Estoy en modo comandos. Escribe <b>/help</b> o <b>ayuda</b> para ver cómo hablarme.\n' +
@@ -182,6 +212,113 @@ function doPost(e) {
         || (update && update.edited_message && update.edited_message.chat && update.edited_message.chat.id);
       if (chatId) sendTelegramMessage_(chatId, '⚠️ Ocurrió un error. Usa <b>/help</b> para ver los comandos.');
     } catch (_) {}
-    return ok_(); // Siempre OK para que Telegram no reintente
+    // Siempre OK para que Telegram no reintente
+    return ok_();
   }
 }
+
+/** ========== Propiedades (token, chat, hoja) ========== **/
+
+/**
+ * Guarda propiedades en Script Properties.
+ * Ya tienes el token guardado, pero te dejo la función por si acaso.
+ * (Después de usarla, borra los literales sensibles del código).
+ */
+function setProps() {
+  // PropertiesService.getScriptProperties().setProperty('TELEGRAM_TOKEN', 'PEGAR_AQUI_TU_TOKEN');
+  // PropertiesService.getScriptProperties().setProperty('ALLOWED_CHAT_ID', '-1001234567890'); // opcional
+  // PropertiesService.getScriptProperties().setProperty('DB_SHEET_ID', 'PEGAR_AQUI_ID_SPREADSHEET'); // opcional
+  Logger.log('✅ Script properties guardadas (revisa con printProps_).');
+}
+
+function printProps_() {
+  const p = PropertiesService.getScriptProperties();
+  Logger.log({
+    has_TELEGRAM_TOKEN: !!p.getProperty('TELEGRAM_TOKEN'),
+    ALLOWED_CHAT_ID: p.getProperty('ALLOWED_CHAT_ID') || '(no set)',
+    DB_SHEET_ID: p.getProperty('DB_SHEET_ID') || '(no set)',
+    BOT_PAUSED: p.getProperty('BOT_PAUSED') || '(no)'
+  });
+}
+
+/** ========== Webhook (poner / quitar / ver) ========== **/
+
+function setWebhook_() {
+  const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  if (!token) throw new Error('Falta TELEGRAM_TOKEN. Ejecuta setProps().');
+
+  // ⚠️ PEGA AQUÍ tu URL /exec del Web App vigente (tras Deploy/Manage/Deploy)
+  const webAppUrl = 'PEGAR_AQUI_TU_WEB_APP_URL';
+
+  const url = 'https://api.telegram.org/bot' + token +
+              '/setWebhook?url=' + encodeURIComponent(webAppUrl) +
+              '&drop_pending_updates=true';
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  Logger.log(res.getContentText());
+}
+
+function deleteWebhook_() {
+  const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/deleteWebhook');
+  Logger.log(res.getContentText());
+}
+
+function getWebhookInfo_() {
+  const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getWebhookInfo');
+  Logger.log(res.getContentText());
+}
+
+/** ========== Diagnóstico rápido ========== **/
+
+function checkToken_getMe_() {
+  const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  const res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getMe');
+  Logger.log(res.getContentText());
+}
+
+function sendTestMessage_() {
+  const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  const chatId = PropertiesService.getScriptProperties().getProperty('ALLOWED_CHAT_ID');
+  if (!token) throw new Error('Falta TELEGRAM_TOKEN.');
+  if (!chatId) throw new Error('Pon ALLOWED_CHAT_ID para test.');
+  const url = 'https://api.telegram.org/bot' + token + '/sendMessage';
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ chat_id: chatId, text: 'Prueba directa desde GAS ✅' }),
+    muteHttpExceptions: true
+  });
+  Logger.log(res.getResponseCode() + ' ' + res.getContentText());
+}
+
+/** ========== Triggers (listar / limpiar si algo spamea) ========== **/
+
+function listTriggers_() {
+  ScriptApp.getProjectTriggers().forEach(t =>
+    Logger.log(t.getHandlerFunction() + ' — ' + t.getEventType()));
+}
+
+function deleteAllTriggers_() {
+  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+  Logger.log('🧹 Eliminados todos los triggers del proyecto.');
+}
+
+/** ========== Simulador de doPost (sin Telegram) ========== **/
+
+function simulateDoPost_() {
+  const fake = {
+    postData: {
+      contents: JSON.stringify({
+        update_id: Date.now(),
+        message: {
+          date: Math.floor(Date.now()/1000),
+          chat: { id: 123456789 },
+          text: '/help',
+          from: { first_name: 'Test', is_bot: false }
+        }
+      })
+    }
+  };
+  const out = doPost(fake);
+  Logger.log('simulateDoPost_ → ' + out.getContent());
