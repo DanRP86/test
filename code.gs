@@ -321,4 +321,27 @@ function simulateDoPost_() {
     }
   };
   const out = doPost(fake);
-  Logger.log('simulateDoPost_ → ' + out.getContent());
+  Logger.log('simulateDoPost_ → ' + out.getContent());}
+
+
+function diagSheets_() {
+  const keys = [
+    'PLANTAS','RECETAS','INGREDIENTES_RECETA',
+    'PASOS_RECETA','INVENTARIO','LISTA_COMPRA',
+    'TAREAS','DEFAULT_TIME'
+  ];
+  keys.forEach(k => {
+    try {
+      const v = Headers.verifyHeaders(k);
+      Logger.log(k + ' → ok=' + v.ok + 
+        ' | missing=[' + v.missing.join(', ') + ']' +
+        ' | extra=[' + v.extra.join(', ') + ']' +
+        ' | found=[' + v.found.join(' | ') + ']');
+    } catch (e) {
+      Logger.log(k + ' → ERROR: ' + e.message);
+    }
+  });
+}
+function runTestSpreadsheetConnection() {
+  testSpreadsheetConnection_(); // esta está en aux.gs
+}
