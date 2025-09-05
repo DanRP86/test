@@ -46,3 +46,10 @@ function testSpreadsheetConnection_() {
     Logger.log('❌ Error al conectar con el Excel: ' + e.message);
   }
 }
+
+////////////
+
+function runTestSpreadsheetConnection() {
+  testSpreadsheetConnection_(); // esta está en aux.gs
+}
+
