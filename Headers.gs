@@ -1,4 +1,4 @@
-//Headers.gs
+// Headers.gs
 
 /***************************************************
  * Headers.gs
@@ -47,8 +47,20 @@ const Headers = (function () {
     ]
   };
 
-  /** === Helpers de acceso/validación === */
+  /** === NUEVO: abrir SIEMPRE por ID, no getActive() === */
+  function getSpreadsheet_() {
+    const id = PropertiesService.getScriptProperties().getProperty('DB_SHEET_ID');
+    if (!id) {
+      throw new Error('Falta DB_SHEET_ID en Script Properties. Guarda el ID de tu hoja antes de usar las funciones.');
+    }
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (e) {
+      throw new Error('DB_SHEET_ID inválido o sin permisos. Revisa el ID y el acceso compartido. ID=' + id);
+    }
+  }
 
+  /** Helpers de acceso/validación (sin cambios salvo getSheet) */
   function getSheetName(key) {
     const k = String(key).toUpperCase();
     const name = SHEETS[k];
@@ -58,8 +70,9 @@ const Headers = (function () {
 
   function getSheet(key) {
     const name = getSheetName(key);
-    const s = SpreadsheetApp.getActive().getSheetByName(name);
-    if (!s) throw new Error(`Headers: no existe la pestaña "${name}" (clave ${key})`);
+    const ss = getSpreadsheet_();                          // <-- ABRIR POR ID
+    const s = ss.getSheetByName(name);
+    if (!s) throw new Error(`Headers: no existe la pestaña "${name}" en la hoja con ID ${ss.getId()}`);
     return s;
   }
 
